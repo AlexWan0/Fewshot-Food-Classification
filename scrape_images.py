@@ -5,7 +5,8 @@ import requests
 import os
 from PIL import Image, UnidentifiedImageError
 from glob import glob
-from datasets import Dataset
+from datasets import Dataset, DatasetDict
+import random
 
 parser = argparse.ArgumentParser(description="Downloads images and outputs to huggingface dataset.")
 parser.add_argument('--article_file', default="dataset/salads/article_text_cleanimages.json", type=str, help='[INPUT] Input file.')
@@ -15,6 +16,8 @@ parser.add_argument('--dataset_dir', default="dataset/salads/salad_dataset/", ty
 parser.add_argument('--url_mapping', default="dataset/salads/url_to_id.json", type=str, help='[OUTPUT] Mapping file from urls to filename ids.')
 parser.add_argument('--label_mapping', default="dataset/salads/mapping.json", type=str, help='[OUTPUT] Mapping file from label name to index.')
 parser.add_argument('--image_dir', default="dataset/salads/salad_images", type=str, help='[OUTPUT] Directory to save downloaded images.')
+
+parser.add_argument('--test_size', default=0.1, type=float, help='[CONFIG] Size of test split.')
 
 args = parser.parse_args()
 
@@ -87,10 +90,37 @@ def add_label(ex):
 
 img_dataset = img_dataset.map(add_label)
 
-img_dataset = img_dataset.train_test_split(test_size=0.1, train_size=0.9, shuffle=True)
+#img_dataset = img_dataset.train_test_split(test_size=0.1, train_size=0.9, shuffle=True)
 
-# the food101 dataset has a validation split but no test split
-img_dataset.rename_column('test', 'validation')
+# label to dataset indices mapping
+label_index = {}
+for i, lbl in enumerate(img_dataset['label']):
+    if lbl not in label_index:
+        label_index[lbl] = []
+    
+    label_index[lbl].append(i)
+
+# train test split, stratified over labels
+train_indices = []
+test_indices = []
+
+for lbl_indices in label_index.values():
+    if len(lbl_indices) <= 1:
+        continue
+    
+    num_samples = int(args.test_size * len(lbl_indices))
+
+    if num_samples == 0:
+        num_samples = 1
+    
+    sample_indices = set(random.sample(range(len(lbl_indices)), num_samples))
+    test_indices.extend([lbl_indices[s_idx] for s_idx in sample_indices])
+    train_indices.extend([l_idx for l_idx in lbl_indices if l_idx not in sample_indices])
+
+img_dataset = DatasetDict({
+    'train': img_dataset.select(train_indices),
+    'validation': img_dataset.select(test_indices),
+})
 
 # write files
 with open(args.url_mapping, 'w') as f_out:
