@@ -56,6 +56,8 @@ def get_data_from_article(article_obj):
     result['text'] = article_obj.text
     result['summary'] = article_obj.summary
 
+    time.sleep(args.timeout)
+
     try:
         page = wikipedia.page(pageid=article_obj.pageid, auto_suggest=True)
         result['images'] = page.images
