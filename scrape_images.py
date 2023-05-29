@@ -7,6 +7,10 @@ from PIL import Image, UnidentifiedImageError
 from glob import glob
 from datasets import Dataset, DatasetDict
 import random
+import tqdm
+from scrape_utils import retry
+import time
+from functools import partial
 
 parser = argparse.ArgumentParser(description="Downloads images and outputs to huggingface dataset.")
 parser.add_argument('--article_file', default="dataset/salads/article_text_cleanimages.json", type=str, help='[INPUT] Input file.')
@@ -18,14 +22,19 @@ parser.add_argument('--label_mapping', default="dataset/salads/mapping.json", ty
 parser.add_argument('--image_dir', default="dataset/salads/salad_images", type=str, help='[OUTPUT] Directory to save downloaded images.')
 
 parser.add_argument('--test_size', default=0.1, type=float, help='[CONFIG] Size of test split.')
+parser.add_argument('--timeout', default=0.1, type=float, help='[CONFIG] Timeout at each iteration for image download.')
+parser.add_argument('--skip_downloaded', default=True, type=bool, help='[CONFIG] Skip already downloaded files.')
 
 args = parser.parse_args()
 
-with open(args.article_file) as f_in:
-    article_data = json.load(f_in)
+article_data_file = open(args.article_file)
 
-just_urls = list(chain(*[ex['images'] for ex in article_data]))
+just_urls = list(chain(*[json.loads(line)['images'] for line in article_data_file if len(line) > 0]))
 ids = list(range(len(just_urls)))
+
+print('found %d urls' % len(just_urls))
+
+article_data_file.seek(0)
 
 url_to_id = {url: idx for url, idx in zip(just_urls, ids)}
 
@@ -38,13 +47,7 @@ headers = {
     'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'
 }
 
-base_dir = args.image_dir
-
-for url, idx in zip(just_urls, ids):
-    extension = url.split('.')[-1]
-    out_fp = os.path.join(base_dir, f'{idx}.{extension}')
-    print(f'{url} -> {out_fp}')
-
+def _download_image(url, out_fp):
     img_data = requests.get(url, headers=headers).content
 
     try:
@@ -56,14 +59,43 @@ for url, idx in zip(just_urls, ids):
     with open(out_fp, 'wb') as img_out:
         img_out.write(img_data)
 
+base_dir = args.image_dir
+
+pbar_download = tqdm.tqdm(zip(just_urls, ids), total=len(ids))
+for url, idx in pbar_download:
+    extension = url.split('.')[-1]
+    out_fp = os.path.join(base_dir, f'{idx}.{extension}')
+    pbar_download.write(f'{url} -> {out_fp}')
+
+    if args.skip_downloaded and len(glob(f'{args.image_dir}/{idx}.*')) >= 1:
+        pbar_download.write(f'id={idx} has already been downloaded, skipping.')
+        continue
+    
+    retry(partial(_download_image, url, out_fp), None, num_retries=2)
+
+    time.sleep(args.timeout)
+
 # make huggingface dataset from images
 # tries to match the format of food101
+pbar_dataset = tqdm.trange(0, len(just_urls))
 def dataset_generator():
-    for ex in article_data:
+    for line in article_data_file:
+        if len(line) == 0:
+            continue
+
+        ex = json.loads(line)
+
         for url in ex['images']:
+            pbar_dataset.update()
+
             url_idx = url_to_id[url]
 
             found_fp = glob(f'{args.image_dir}/{url_idx}.*')
+
+            if len(found_fp) == 0:
+                pbar_dataset.write(f'No image for id={url_idx} found.')
+                continue
+
             assert len(found_fp) == 1
 
             img_fp = found_fp[0]
@@ -71,6 +103,7 @@ def dataset_generator():
             try:
                 image = Image.open(img_fp)
             except UnidentifiedImageError:
+                pbar_dataset.write(f'Error opening image for id={url_idx}')
                 continue
 
             ex_copy = dict(ex)
@@ -126,6 +159,9 @@ img_dataset = DatasetDict({
     'validation': img_dataset.select(test_indices),
 })
 
+print('items in train:', len(img_dataset['train']))
+print('items in validation:', len(img_dataset['validation']))
+
 # write files
 with open(args.url_mapping, 'w') as f_out:
     json.dump(url_to_id, f_out)
@@ -134,3 +170,5 @@ with open(args.label_mapping, 'w') as f_out:
     json.dump(label_to_idx, f_out)
 
 img_dataset.save_to_disk(args.dataset_dir)
+
+article_data_file.close()
