@@ -5,14 +5,14 @@ import json
 import time
 import pickle
 import tqdm
+from functools import partial
 
 parser = argparse.ArgumentParser(description="Gets article data from wikpedia.")
 parser.add_argument('--category', default="Category:Salads", type=str, help='Starting category for scrape (root node).')
-parser.add_argument('--out_file', default="dataset/salads/article_text_cleanimages.json", type=str, help='Output file.')
+parser.add_argument('--out_file', default="dataset/salads/article_text_cleanimages.jsonl", type=str, help='Output file.')
 parser.add_argument('--out_hierarchy', default="dataset/salads/article_hierarchy.pkl", type=str, help='Output for wikipedia article hierarchy.')
 parser.add_argument('--max_depth', default=3, type=int, help='Maximum depth of nested categories to find articles.')
 parser.add_argument('--timeout', default=0.05, type=float, help='Timeout at each iteration.')
-parser.add_argument('--save_interval', default=100, type=int, help='Save temp article text at this interval when getting article data from hierarchy.')
 
 parser.add_argument('--from_hierarchy', default=None, type=str, help='Get article from hierarchy pkl file.', required=False)
 
@@ -37,6 +37,10 @@ def retry(func, default, num_retries=5, timeout=120):
 
 def count_nested_list(lst):
     return sum([count_nested_list(l) if isinstance(l, list) else 1 for l in lst])
+
+def read_jsonl(fn):
+    with open(fn) as f_in:
+        return [json.loads(line) for line in f_in if len(line.strip()) > 0]
 
 # init api
 wiki_wiki = wikipediaapi.Wikipedia(language='en')
@@ -118,13 +122,14 @@ def get_data_from_article(article_obj):
     return result
 
 pbar = tqdm.trange(0, count)
-counter = 0
+
+temp_fp = args.out_file.strip() + '_temp'
+temp_file = open(temp_fp, 'w')
+
+pbar.write('Saving to: %s' % temp_fp)
 
 dfs_blacklist = ['List of', 'Category:', 'Template:', 'Talk:']
-article_data = []
 def dfs(article_graph):
-    global counter
-
     if isinstance(article_graph, list):
         for article in article_graph:
             dfs(article)
@@ -132,20 +137,17 @@ def dfs(article_graph):
         title = article_graph.title
         if not has_blacklist_keywords(title, dfs_blacklist):
             pbar.write(article_graph.title)
-            article_data.append(get_data_from_article(article_graph))
 
-        if counter != 0 and counter % args.save_interval == 0:
-            checkpoint_fp = args.out_file.strip() + '_temp'
-            pbar.write('Saving to %s' % checkpoint_fp)
+            article_data = get_data_from_article(article_graph)
 
-            with open(checkpoint_fp, 'w') as f_out:
-                json.dump(article_data, f_out)
+            temp_file.write(json.dumps(article_data) + '\n')
 
         pbar.update()
-        counter += 1
 
 # outputs to article_data list
 dfs(result)
+
+temp_file.close()
 
 # clean image links
 def is_valid_image(link):
@@ -163,7 +165,12 @@ def is_valid_image(link):
 
     return True
 
-def prune_image_links(ex):
+def prune_image_links(out_file, article_line):
+    if len(article_line.strip()) == 0:
+        return
+    
+    ex = json.loads(article_line)
+
     if 'images' not in ex:
         ex['images'] = []
         return ex
@@ -171,10 +178,14 @@ def prune_image_links(ex):
     image_links = ex['images']
     image_links = list(filter(is_valid_image, image_links))
     ex['images'] = image_links
-    return ex
 
-article_data = list(map(prune_image_links, article_data))
+    out_file.write(json.dumps(ex) + '\n')
 
-# output to file
-with open(args.out_file, 'w') as f_out:
-    json.dump(article_data, f_out)
+output_file = open(args.out_file, 'w')
+temp_file = open(temp_fp)
+
+for _ in map(partial(prune_image_links, output_file), temp_file):
+    pass
+
+temp_file.close()
+output_file.close()
