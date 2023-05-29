@@ -4,6 +4,7 @@ import argparse
 import json
 import time
 import pickle
+import tqdm
 
 parser = argparse.ArgumentParser(description="Gets article data from wikpedia.")
 parser.add_argument('--category', default="Category:Salads", type=str, help='Starting category for scrape (root node).')
@@ -11,6 +12,7 @@ parser.add_argument('--out_file', default="dataset/salads/article_text_cleanimag
 parser.add_argument('--out_hierarchy', default="dataset/salads/article_hierarchy.pkl", type=str, help='Output for wikipedia article hierarchy.')
 parser.add_argument('--max_depth', default=3, type=int, help='Maximum depth of nested categories to find articles.')
 parser.add_argument('--timeout', default=0.05, type=float, help='Timeout at each iteration.')
+parser.add_argument('--save_interval', default=100, type=int, help='Save temp article text at this interval when getting article data from hierarchy.')
 
 parser.add_argument('--from_hierarchy', default=None, type=str, help='Get article from hierarchy pkl file.', required=False)
 
@@ -32,6 +34,9 @@ def retry(func, default, num_retries=5, timeout=120):
         print(f'num_retries={num_retries}, timeout={timeout}')
         time.sleep(timeout)
         return retry(func, default, num_retries=(num_retries - 1), timeout=timeout)
+
+def count_nested_list(lst):
+    return sum([count_nested_list(l) if isinstance(l, list) else 1 for l in lst])
 
 # init api
 wiki_wiki = wikipediaapi.Wikipedia(language='en')
@@ -67,6 +72,7 @@ def get_category_members(category, level=0, max_level=3, verbose=True):
     return depth_result, total
 
 result = None
+count = None
 if args.from_hierarchy is None:
     cat = wiki_wiki.page(args.category)
     result, count = get_category_members(cat, max_level=args.max_depth)
@@ -79,7 +85,9 @@ else:
     with open(args.from_hierarchy, 'rb') as f_in:
         result = pickle.load(f_in)
     
-    print("loaded articles from %s" % args.from_hierarchy)
+    count = count_nested_list(result)
+
+    print("loaded %d articles from %s" % (count, args.from_hierarchy))
 
 # flatten hierarchy and get article data from articles
 def get_data_from_article(article_obj):
@@ -96,24 +104,45 @@ def get_data_from_article(article_obj):
     time.sleep(args.timeout)
 
     def _add_images():
-        page = wikipedia.page(pageid=article_obj.pageid, auto_suggest=False)
-        result['images'] = page.images
+        try:
+            page = wikipedia.page(pageid=article_obj.pageid, auto_suggest=False)
+            result['images'] = page.images
+        except Exception as e: # do better error handling lol
+            if str(e) == "'WikipediaPage' object has no attribute 'title'":
+                return None
+            else:
+                raise e
     
-    retry(_add_images, default=None, num_retries=2, timeout=10)
+    retry(_add_images, default=None, num_retries=2)
 
     return result
+
+pbar = tqdm.trange(0, count)
+counter = 0
 
 dfs_blacklist = ['List of', 'Category:', 'Template:', 'Talk:']
 article_data = []
 def dfs(article_graph):
+    global counter
+
     if isinstance(article_graph, list):
         for article in article_graph:
             dfs(article)
     else:
         title = article_graph.title
         if not has_blacklist_keywords(title, dfs_blacklist):
-            print(article_graph.title)
+            pbar.write(article_graph.title)
             article_data.append(get_data_from_article(article_graph))
+
+        if counter != 0 and counter % args.save_interval == 0:
+            checkpoint_fp = args.out_file.strip() + '_temp'
+            pbar.write('Saving to %s' % checkpoint_fp)
+
+            with open(checkpoint_fp, 'w') as f_out:
+                json.dump(article_data, f_out)
+
+        pbar.update()
+        counter += 1
 
 # outputs to article_data list
 dfs(result)

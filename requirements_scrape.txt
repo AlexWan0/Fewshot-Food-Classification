@@ -3,3 +3,4 @@ Pillow
 datasets
 Wikipedia-API
 wikipedia
+tqdm
