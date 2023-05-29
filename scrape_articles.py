@@ -16,19 +16,25 @@ wiki_wiki = wikipediaapi.Wikipedia(language='en')
 # get page hierarchy from starting category
 def get_category_members(categorymembers, level=0, max_level=3, verbose=True):
     depth_result = []
+    total = 0
     for c in categorymembers.values():
         if verbose:
             print("%s: %s (ns: %d)" % ("*" * (level + 1), c.title, c.ns))
         
         if c.ns == wikipediaapi.Namespace.CATEGORY and level < max_level:
-            depth_result.append(get_category_members(c.categorymembers, level=level + 1, max_level=max_level))
+            members, count = get_category_members(c.categorymembers, level=level + 1, max_level=max_level)
+            depth_result.append(members)
+            total += count
         else:
             depth_result.append(c)
+            total += 1
 
-    return depth_result
+    return depth_result, total
 
 cat = wiki_wiki.page(args.category)
-result = get_category_members(cat.categorymembers, max_level=args.max_depth)
+result, count = get_category_members(cat.categorymembers, max_level=args.max_depth)
+
+print("found %d articles" % count)
 
 # flatten hierarchy and get article data from articles
 def get_data_from_article(article_obj):
