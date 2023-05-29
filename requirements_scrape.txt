@@ -1,5 +1,5 @@
 requests
 Pillow
 datasets
-wikipediaapi
+Wikipedia-API
 wikipedia
