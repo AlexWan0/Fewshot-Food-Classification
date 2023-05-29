@@ -2,18 +2,24 @@ import wikipediaapi # wikipediaapi can handle categories, but not images
 import wikipedia # wikipedia can handle images, but not categories :/
 import argparse
 import json
+import time
 
 parser = argparse.ArgumentParser(description="Gets article data from wikpedia.")
 parser.add_argument('--category', default="Category:Salads", type=str, help='Starting category for scrape (root node).')
 parser.add_argument('--out_file', default="dataset/salads/article_text_cleanimages.json", type=str, help='Output file.')
 parser.add_argument('--max_depth', default=3, type=int, help='Maximum depth of nested categories to find articles.')
-
+parser.add_argument('--timeout', default=0.05, type=float, help='Timeout at each iteration.')
 args = parser.parse_args()
+
+# util function
+def has_blacklist_keywords(title, blacklist_keywords):
+    return any([keyword in title for keyword in blacklist_keywords])
 
 # init api
 wiki_wiki = wikipediaapi.Wikipedia(language='en')
 
 # get page hierarchy from starting category
+category_member_blacklist = ['by country']
 def get_category_members(categorymembers, level=0, max_level=3, verbose=True):
     depth_result = []
     total = 0
@@ -21,6 +27,9 @@ def get_category_members(categorymembers, level=0, max_level=3, verbose=True):
         if verbose:
             print("%s: %s (ns: %d)" % ("*" * (level + 1), c.title, c.ns))
         
+        if has_blacklist_keywords(c.title, category_member_blacklist):
+            continue
+
         if c.ns == wikipediaapi.Namespace.CATEGORY and level < max_level:
             members, count = get_category_members(c.categorymembers, level=level + 1, max_level=max_level)
             depth_result.append(members)
@@ -28,6 +37,8 @@ def get_category_members(categorymembers, level=0, max_level=3, verbose=True):
         else:
             depth_result.append(c)
             total += 1
+        
+        time.sleep(args.timeout)
 
     return depth_result, total
 
@@ -53,10 +64,7 @@ def get_data_from_article(article_obj):
 
     return result
 
-blacklist_keywords = ['List of', 'Category:', 'Template:']
-def has_blacklist_keywords(title):
-    return any([keyword in title for keyword in blacklist_keywords])
-
+dfs_blacklist = ['List of', 'Category:', 'Template:']
 article_data = []
 def dfs(article_graph):
     if isinstance(article_graph, list):
@@ -64,7 +72,7 @@ def dfs(article_graph):
             dfs(article)
     else:
         title = article_graph.title
-        if not has_blacklist_keywords(title):
+        if not has_blacklist_keywords(title, dfs_blacklist):
             print(article_graph.title)
             article_data.append(get_data_from_article(article_graph))
 
