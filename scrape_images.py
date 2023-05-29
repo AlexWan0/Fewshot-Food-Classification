@@ -109,6 +109,7 @@ test_indices = []
 
 for lbl_indices in label_index.values():
     if len(lbl_indices) <= 1:
+        train_indices.extend(lbl_indices)
         continue
     
     num_samples = int(args.test_size * len(lbl_indices))
