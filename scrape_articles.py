@@ -3,10 +3,12 @@ import wikipedia # wikipedia can handle images, but not categories :/
 import argparse
 import json
 import time
+import pickle
 
 parser = argparse.ArgumentParser(description="Gets article data from wikpedia.")
 parser.add_argument('--category', default="Category:Salads", type=str, help='Starting category for scrape (root node).')
 parser.add_argument('--out_file', default="dataset/salads/article_text_cleanimages.json", type=str, help='Output file.')
+parser.add_argument('--out_hierarchy', default="dataset/salads/article_hierarchy.pkl", type=str, help='Output for wikipedia article hierarchy.')
 parser.add_argument('--max_depth', default=3, type=int, help='Maximum depth of nested categories to find articles.')
 parser.add_argument('--timeout', default=0.05, type=float, help='Timeout at each iteration.')
 args = parser.parse_args()
@@ -20,10 +22,10 @@ wiki_wiki = wikipediaapi.Wikipedia(language='en')
 
 # get page hierarchy from starting category
 category_member_blacklist = ['by country']
-def get_category_members(categorymembers, level=0, max_level=3, verbose=True):
-    depth_result = []
+def get_category_members(category, level=0, max_level=3, verbose=True):
+    depth_result = [category]
     total = 0
-    for c in categorymembers.values():
+    for c in category.categorymembers.values():
         if verbose:
             print("%s: %s (ns: %d)" % ("*" * (level + 1), c.title, c.ns))
         
@@ -31,7 +33,7 @@ def get_category_members(categorymembers, level=0, max_level=3, verbose=True):
             continue
 
         if c.ns == wikipediaapi.Namespace.CATEGORY and level < max_level:
-            members, count = get_category_members(c.categorymembers, level=level + 1, max_level=max_level)
+            members, count = get_category_members(c, level=level + 1, max_level=max_level)
             depth_result.append(members)
             total += count
         else:
@@ -43,7 +45,10 @@ def get_category_members(categorymembers, level=0, max_level=3, verbose=True):
     return depth_result, total
 
 cat = wiki_wiki.page(args.category)
-result, count = get_category_members(cat.categorymembers, max_level=args.max_depth)
+result, count = get_category_members(cat, max_level=args.max_depth)
+
+with open(args.out_hierarchy, 'wb') as f_out:
+    pickle.dump(result, f_out)
 
 print("found %d articles" % count)
 

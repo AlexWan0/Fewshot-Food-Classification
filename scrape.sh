@@ -8,6 +8,7 @@ mkdir dataset/$name/images
 python scrape_articles.py \
     --category "Category:Noodles" \
     --out_file dataset/$name/article_text.json \
+    --out_hierarchy dataset/$name/article_hierarchy.pkl \
     --max_depth 0
 
 python scrape_images.py \
