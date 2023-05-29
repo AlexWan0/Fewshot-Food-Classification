@@ -6,6 +6,7 @@ import json
 parser = argparse.ArgumentParser(description="Gets article data from wikpedia.")
 parser.add_argument('--category', default="Category:Salads", type=str, help='Starting category for scrape (root node).')
 parser.add_argument('--out_file', default="dataset/salads/article_text_cleanimages.json", type=str, help='Output file.')
+parser.add_argument('--max_depth', default=3, type=int, help='Maximum depth of nested categories to find articles.')
 
 args = parser.parse_args()
 
@@ -27,7 +28,7 @@ def get_category_members(categorymembers, level=0, max_level=3, verbose=True):
     return depth_result
 
 cat = wiki_wiki.page(args.category)
-result = get_category_members(cat.categorymembers)
+result = get_category_members(cat.categorymembers, max_level=args.max_depth)
 
 # flatten hierarchy and get article data from articles
 def get_data_from_article(article_obj):
@@ -46,6 +47,10 @@ def get_data_from_article(article_obj):
 
     return result
 
+blacklist_keywords = ['List of', 'Category:', 'Template:']
+def has_blacklist_keywords(title):
+    return any([keyword in title for keyword in blacklist_keywords])
+
 article_data = []
 def dfs(article_graph):
     if isinstance(article_graph, list):
@@ -53,7 +58,7 @@ def dfs(article_graph):
             dfs(article)
     else:
         title = article_graph.title
-        if 'List of' not in title:
+        if not has_blacklist_keywords(title):
             print(article_graph.title)
             article_data.append(get_data_from_article(article_graph))
 
