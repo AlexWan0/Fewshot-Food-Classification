@@ -38,6 +38,9 @@ article_data_file.seek(0)
 
 url_to_id = {url: idx for url, idx in zip(just_urls, ids)}
 
+with open(args.url_mapping, 'w') as f_out:
+    json.dump(url_to_id, f_out)
+
 # download images
 with open(args.user_agent_file) as f_in:
     user_agent_string = f_in.read().strip()
@@ -118,6 +121,9 @@ img_dataset = Dataset.from_generator(dataset_generator)
 # the title of the article is the label fo the image
 label_to_idx = {label: idx for idx, label in enumerate(set(img_dataset['title']))}
 
+with open(args.label_mapping, 'w') as f_out:
+    json.dump(label_to_idx, f_out)
+
 def add_label(ex):
     label_idx = label_to_idx[ex['title']]
     ex['label'] = label_idx
@@ -163,12 +169,6 @@ print('items in train:', len(img_dataset['train']))
 print('items in validation:', len(img_dataset['validation']))
 
 # write files
-with open(args.url_mapping, 'w') as f_out:
-    json.dump(url_to_id, f_out)
-
-with open(args.label_mapping, 'w') as f_out:
-    json.dump(label_to_idx, f_out)
-
 img_dataset.save_to_disk(args.dataset_dir)
 
 article_data_file.close()
