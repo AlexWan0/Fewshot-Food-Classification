@@ -11,21 +11,43 @@ parser.add_argument('--out_file', default="dataset/salads/article_text_cleanimag
 parser.add_argument('--out_hierarchy', default="dataset/salads/article_hierarchy.pkl", type=str, help='Output for wikipedia article hierarchy.')
 parser.add_argument('--max_depth', default=3, type=int, help='Maximum depth of nested categories to find articles.')
 parser.add_argument('--timeout', default=0.05, type=float, help='Timeout at each iteration.')
+
+parser.add_argument('--from_hierarchy', default=None, type=str, help='Get article from hierarchy pkl file.', required=False)
+
 args = parser.parse_args()
 
 # util function
 def has_blacklist_keywords(title, blacklist_keywords):
     return any([keyword in title for keyword in blacklist_keywords])
 
+def retry(func, default, num_retries=5, timeout=120):
+    if num_retries <= 0:
+        print(f'No more retries. Returning default={default}')
+        return default
+
+    try:
+        return func()
+    except Exception as e:
+        print(e)
+        print(f'num_retries={num_retries}, timeout={timeout}')
+        time.sleep(timeout)
+        return retry(func, default, num_retries=(num_retries - 1), timeout=timeout)
+
 # init api
 wiki_wiki = wikipediaapi.Wikipedia(language='en')
 
 # get page hierarchy from starting category
-category_member_blacklist = ['by country']
+category_member_blacklist = ['by country', 'by nationality'] # skip similar meta category listings
 def get_category_members(category, level=0, max_level=3, verbose=True):
     depth_result = [category]
     total = 0
-    for c in category.categorymembers.values():
+
+    def _category_members():
+        return category.categorymembers
+
+    category_members = retry(_category_members, default={})
+
+    for c in category_members.values():
         if verbose:
             print("%s: %s (ns: %d)" % ("*" * (level + 1), c.title, c.ns))
         
@@ -44,34 +66,44 @@ def get_category_members(category, level=0, max_level=3, verbose=True):
 
     return depth_result, total
 
-cat = wiki_wiki.page(args.category)
-result, count = get_category_members(cat, max_level=args.max_depth)
+result = None
+if args.from_hierarchy is None:
+    cat = wiki_wiki.page(args.category)
+    result, count = get_category_members(cat, max_level=args.max_depth)
 
-with open(args.out_hierarchy, 'wb') as f_out:
-    pickle.dump(result, f_out)
+    with open(args.out_hierarchy, 'wb') as f_out:
+        pickle.dump(result, f_out)
 
-print("found %d articles" % count)
+    print("found %d articles" % count)
+else:
+    with open(args.from_hierarchy, 'rb') as f_in:
+        result = pickle.load(f_in)
+    
+    print("loaded articles from %s" % args.from_hierarchy)
 
 # flatten hierarchy and get article data from articles
 def get_data_from_article(article_obj):
     result = {}
 
-    result['pageid'] = article_obj.pageid
-    result['title'] = article_obj.title
-    result['text'] = article_obj.text
-    result['summary'] = article_obj.summary
+    def _add_attributes():
+        result['pageid'] = article_obj.pageid
+        result['title'] = article_obj.title
+        result['text'] = article_obj.text
+        result['summary'] = article_obj.summary
+
+    retry(_add_attributes, default=None, num_retries=2)
 
     time.sleep(args.timeout)
 
-    try:
-        page = wikipedia.page(pageid=article_obj.pageid, auto_suggest=True)
+    def _add_images():
+        page = wikipedia.page(pageid=article_obj.pageid, auto_suggest=False)
         result['images'] = page.images
-    except Exception as e:
-        print(e)
+    
+    retry(_add_images, default=None, num_retries=2, timeout=10)
 
     return result
 
-dfs_blacklist = ['List of', 'Category:', 'Template:']
+dfs_blacklist = ['List of', 'Category:', 'Template:', 'Talk:']
 article_data = []
 def dfs(article_graph):
     if isinstance(article_graph, list):
