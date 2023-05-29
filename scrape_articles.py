@@ -6,7 +6,7 @@ import time
 import pickle
 import tqdm
 from functools import partial
-from utils import has_blacklist_keywords, retry, count_nested_list, read_jsonl, is_valid_image
+from scrape_utils import has_blacklist_keywords, retry, count_nested_list, read_jsonl, is_valid_image
 
 parser = argparse.ArgumentParser(description="Gets article data from wikpedia.")
 parser.add_argument('--category', default="Category:Salads", type=str, help='Starting category for scrape (root node).')
