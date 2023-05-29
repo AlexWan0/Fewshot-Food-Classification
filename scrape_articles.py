@@ -100,5 +100,5 @@ def prune_image_links(ex):
 article_data = list(map(prune_image_links, article_data))
 
 # output to file
-with open(args.file_out, 'w') as f_out:
+with open(args.out_file, 'w') as f_out:
     json.dump(article_data, f_out)
