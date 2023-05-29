@@ -42,6 +42,21 @@ def read_jsonl(fn):
     with open(fn) as f_in:
         return [json.loads(line) for line in f_in if len(line.strip()) > 0]
 
+def is_valid_image(link):
+    if '/commons/' not in link:
+        return False
+    
+    if 'Flag of' in link:
+        return False
+    
+    if 'Wiki' in link:
+        return False
+
+    if link.endswith('.svg'):
+        return False
+
+    return True
+
 # init api
 wiki_wiki = wikipediaapi.Wikipedia(language='en')
 
@@ -107,26 +122,31 @@ def get_data_from_article(article_obj):
 
     time.sleep(args.timeout)
 
-    def _add_images():
+    def _get_images():
         try:
             page = wikipedia.page(pageid=article_obj.pageid, auto_suggest=False)
-            result['images'] = page.images
+            return page.images
         except Exception as e: # do better error handling lol
             if str(e) == "'WikipediaPage' object has no attribute 'title'":
-                return None
+                return []
             else:
                 raise e
     
-    retry(_add_images, default=None, num_retries=2)
+    result['images_all'] = retry(_get_images, default=[], num_retries=2)
+    
+    image_links = result['images_all']
+    image_links = list(filter(is_valid_image, image_links))
+    result['images'] = image_links
 
     return result
 
 pbar = tqdm.trange(0, count)
 
-temp_fp = args.out_file.strip() + '_temp'
-temp_file = open(temp_fp, 'w')
+pbar.write('Saving to: %s' % args.out_file)
 
-pbar.write('Saving to: %s' % temp_fp)
+file_out = open(args.out_file, 'w')
+
+visited_articles = set()
 
 dfs_blacklist = ['List of', 'Category:', 'Template:', 'Talk:']
 def dfs(article_graph):
@@ -135,57 +155,18 @@ def dfs(article_graph):
             dfs(article)
     else:
         title = article_graph.title
-        if not has_blacklist_keywords(title, dfs_blacklist):
-            pbar.write(article_graph.title)
-
+        article_id = article_graph.pageid
+        if (not has_blacklist_keywords(title, dfs_blacklist)) and (article_id not in visited_articles):
+            visited_articles.add(article_id)
+            
             article_data = get_data_from_article(article_graph)
 
-            temp_file.write(json.dumps(article_data) + '\n')
+            pbar.write(f"{article_graph.title}: found {len(article_data['images'])} images")
+
+            file_out.write(json.dumps(article_data) + '\n')
 
         pbar.update()
 
-# outputs to article_data list
 dfs(result)
 
-temp_file.close()
-
-# clean image links
-def is_valid_image(link):
-    if '/commons/' not in link:
-        return False
-    
-    if 'Flag of' in link:
-        return False
-    
-    if 'Wiki' in link:
-        return False
-
-    if link.endswith('.svg'):
-        return False
-
-    return True
-
-def prune_image_links(out_file, article_line):
-    if len(article_line.strip()) == 0:
-        return
-    
-    ex = json.loads(article_line)
-
-    if 'images' not in ex:
-        ex['images'] = []
-        return ex
-    
-    image_links = ex['images']
-    image_links = list(filter(is_valid_image, image_links))
-    ex['images'] = image_links
-
-    out_file.write(json.dumps(ex) + '\n')
-
-output_file = open(args.out_file, 'w')
-temp_file = open(temp_fp)
-
-for _ in map(partial(prune_image_links, output_file), temp_file):
-    pass
-
-temp_file.close()
-output_file.close()
+file_out.close()
