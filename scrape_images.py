@@ -30,8 +30,11 @@ ids = list(range(len(just_urls)))
 url_to_id = {url: idx for url, idx in zip(just_urls, ids)}
 
 # download images
+with open(args.user_agent_file) as f_in:
+    user_agent_string = f_in.read().strip()
+
 headers = {
-    'User-Agent': open('USER_AGENT.txt').read(),
+    'User-Agent': user_agent_string,
     'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'
 }
 
