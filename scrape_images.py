@@ -11,6 +11,8 @@ import tqdm
 from scrape_utils import retry
 import time
 from functools import partial
+from PIL import Image, ImageOps                                                                       
+Image.warnings.simplefilter('error', Image.DecompressionBombWarning)
 
 parser = argparse.ArgumentParser(description="Downloads images and outputs to huggingface dataset.")
 parser.add_argument('--article_file', default="dataset/salads/article_text_cleanimages.json", type=str, help='[INPUT] Input file.')
@@ -24,6 +26,8 @@ parser.add_argument('--image_dir', default="dataset/salads/salad_images", type=s
 parser.add_argument('--test_size', default=0.1, type=float, help='[CONFIG] Size of test split.')
 parser.add_argument('--timeout', default=0.1, type=float, help='[CONFIG] Timeout at each iteration for image download.')
 parser.add_argument('--skip_downloaded', default=True, type=bool, help='[CONFIG] Skip already downloaded files.')
+parser.add_argument('--num_workers', default=4, type=int, help='[CONFIG] Number of processes for generating huggingface dataset.')
+parser.add_argument('--image_size', default=512, type=int, help='[CONFIG] Maximum width and height of image.')
 
 args = parser.parse_args()
 
@@ -64,58 +68,95 @@ def _download_image(url, out_fp):
 
 base_dir = args.image_dir
 
-pbar_download = tqdm.tqdm(zip(just_urls, ids), total=len(ids))
-for url, idx in pbar_download:
-    extension = url.split('.')[-1]
-    out_fp = os.path.join(base_dir, f'{idx}.{extension}')
-    pbar_download.write(f'{url} -> {out_fp}')
+# pbar_download = tqdm.tqdm(zip(just_urls, ids), total=len(ids))
+# for url, idx in pbar_download:
+#     extension = url.split('.')[-1]
+#     out_fp = os.path.join(base_dir, f'{idx}.{extension}')
+#     pbar_download.write(f'{url} -> {out_fp}')
 
-    if args.skip_downloaded and len(glob(f'{args.image_dir}/{idx}.*')) >= 1:
-        pbar_download.write(f'id={idx} has already been downloaded, skipping.')
-        continue
+#     if args.skip_downloaded and len(glob(f'{args.image_dir}/{idx}.*')) >= 1:
+#         pbar_download.write(f'id={idx} has already been downloaded, skipping.')
+#         continue
     
-    retry(partial(_download_image, url, out_fp), None, num_retries=2)
+#     retry(partial(_download_image, url, out_fp), None, num_retries=2)
 
-    time.sleep(args.timeout)
+#     time.sleep(args.timeout)
 
 # make huggingface dataset from images
 # tries to match the format of food101
-pbar_dataset = tqdm.trange(0, len(just_urls))
-def dataset_generator():
-    for line in article_data_file:
-        if len(line) == 0:
+
+def preprocess_image(pil_image):
+    return ImageOps.contain(pil_image, (args.image_size, args.image_size))
+
+# count num files to process (for multiprocessing)
+num_lines = sum(1 for _ in article_data_file)
+article_data_file.close()
+
+samples_per_worker = num_lines // args.num_workers
+
+def get_images(ex, pbar):
+    for url in ex['images']:
+        url_idx = url_to_id[url]
+
+        found_fp = glob(f'{args.image_dir}/{url_idx}.*')
+
+        if len(found_fp) == 0:
+            pbar.write(f'No image for id={url_idx} found.')
             continue
 
-        ex = json.loads(line)
+        assert len(found_fp) == 1
 
-        for url in ex['images']:
+        img_fp = found_fp[0]
+        
+        try:
+            image = Image.open(img_fp)
+        except UnidentifiedImageError:
+            pbar.write(f'Error opening image for id={url_idx}')
+            continue
+
+        ex_copy = dict(ex)
+        del ex_copy['images']
+
+        ex_copy['image'] = preprocess_image(image)
+        
+        yield ex_copy
+
+def dataset_generator(rank):
+    rank = rank[0]
+
+    from_idx = rank * samples_per_worker
+
+    if rank != (args.num_workers - 1):
+        to_idx = (rank + 1) * samples_per_worker
+    else:
+        to_idx = num_lines
+
+    pbar_dataset = tqdm.trange(0, to_idx - from_idx, position=(rank + 1))
+    pbar_dataset.set_description(f'rank={rank}')
+
+    with open(args.article_file) as worker_article_file:
+        for i, line in enumerate(worker_article_file):
+            if len(line) == 0:
+                continue
+            
+            # maybe cache linebreak positions so you don't have to needlessly iterate?
+            if i < from_idx:
+                continue
+
+            if i >= to_idx:
+                break
+
+            ex = json.loads(line)
+
+            yield from get_images(ex, pbar_dataset)
+            
             pbar_dataset.update()
 
-            url_idx = url_to_id[url]
-
-            found_fp = glob(f'{args.image_dir}/{url_idx}.*')
-
-            if len(found_fp) == 0:
-                pbar_dataset.write(f'No image for id={url_idx} found.')
-                continue
-
-            assert len(found_fp) == 1
-
-            img_fp = found_fp[0]
-            
-            try:
-                image = Image.open(img_fp)
-            except UnidentifiedImageError:
-                pbar_dataset.write(f'Error opening image for id={url_idx}')
-                continue
-
-            ex_copy = dict(ex)
-            del ex_copy['images']
-
-            ex_copy['image'] = image
-            yield ex_copy
-
-img_dataset = Dataset.from_generator(dataset_generator)
+img_dataset = Dataset.from_generator(
+    dataset_generator,
+    num_proc=args.num_workers,
+    gen_kwargs={'rank': list(range(args.num_workers))}
+)
 
 # convert text labels to integer labels
 # the title of the article is the label fo the image
@@ -170,5 +211,3 @@ print('items in validation:', len(img_dataset['validation']))
 
 # write files
 img_dataset.save_to_disk(args.dataset_dir)
-
-article_data_file.close()
