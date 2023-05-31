@@ -11,8 +11,8 @@ import tqdm
 from scrape_utils import retry
 import time
 from functools import partial
-from PIL import Image, ImageOps                                                                       
-Image.warnings.simplefilter('error', Image.DecompressionBombWarning)
+from PIL import Image, ImageOps                                                       
+Image.MAX_IMAGE_PIXELS = 1000_000_000
 
 parser = argparse.ArgumentParser(description="Downloads images and outputs to huggingface dataset.")
 parser.add_argument('--article_file', default="dataset/salads/article_text_cleanimages.json", type=str, help='[INPUT] Input file.')
