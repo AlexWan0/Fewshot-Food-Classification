@@ -68,19 +68,19 @@ def _download_image(url, out_fp):
 
 base_dir = args.image_dir
 
-# pbar_download = tqdm.tqdm(zip(just_urls, ids), total=len(ids))
-# for url, idx in pbar_download:
-#     extension = url.split('.')[-1]
-#     out_fp = os.path.join(base_dir, f'{idx}.{extension}')
-#     pbar_download.write(f'{url} -> {out_fp}')
+pbar_download = tqdm.tqdm(zip(just_urls, ids), total=len(ids))
+for url, idx in pbar_download:
+    extension = url.split('.')[-1]
+    out_fp = os.path.join(base_dir, f'{idx}.{extension}')
+    pbar_download.write(f'{url} -> {out_fp}')
 
-#     if args.skip_downloaded and len(glob(f'{args.image_dir}/{idx}.*')) >= 1:
-#         pbar_download.write(f'id={idx} has already been downloaded, skipping.')
-#         continue
+    if args.skip_downloaded and len(glob(f'{args.image_dir}/{idx}.*')) >= 1:
+        pbar_download.write(f'id={idx} has already been downloaded, skipping.')
+        continue
     
-#     retry(partial(_download_image, url, out_fp), None, num_retries=2)
+    retry(partial(_download_image, url, out_fp), None, num_retries=2)
 
-#     time.sleep(args.timeout)
+    time.sleep(args.timeout)
 
 # make huggingface dataset from images
 # tries to match the format of food101
