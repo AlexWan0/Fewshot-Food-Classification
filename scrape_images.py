@@ -110,14 +110,14 @@ def get_images(ex, pbar):
         
         try:
             image = Image.open(img_fp)
-        except UnidentifiedImageError:
-            pbar.write(f'Error opening image for id={url_idx}')
+
+            ex_copy = dict(ex)
+            del ex_copy['images']
+
+            ex_copy['image'] = preprocess_image(image)
+        except Exception as e:
+            pbar.write(f'Error opening image for id={url_idx} - {e}')
             continue
-
-        ex_copy = dict(ex)
-        del ex_copy['images']
-
-        ex_copy['image'] = preprocess_image(image)
         
         yield ex_copy
 
