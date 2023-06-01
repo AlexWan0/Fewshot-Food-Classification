@@ -6,4 +6,4 @@ Currently have a rough implementation of [TIP-Adapter](https://github.com/gaopen
 
 Code is a bit messy.
 
-Dataset containing images and articles from the "Cuisine by Country" category can be found [here](https://huggingface.co/datasets/alexwan0/wikipedia-foods). The labels are labels corresponding to the page titles. Removal of some labels may be needed (e.g., the `National Food` page).
+Dataset containing images and articles from the "Cuisine by Country" category can be found [here](https://huggingface.co/datasets/alexwan0/wikipedia-foods). The labels are labels corresponding to the page titles. The mapping can also be found in `dataset/cuisine_by_country/label_mapping.json` Removal of some labels may be needed (e.g., the `National Food` page).
