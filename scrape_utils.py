@@ -1,7 +1,10 @@
 import time
 import json
 
-def has_blacklist_keywords(title, blacklist_keywords):
+def has_blacklist_keywords(title, blacklist_keywords, lower=False):
+    if lower:
+        title = title.lower()
+
     return any([keyword in title for keyword in blacklist_keywords])
 
 def retry(func, default, num_retries=5, timeout=120):
